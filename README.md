@@ -27,9 +27,12 @@ See `docs/` (added per phase) for the full blueprint.
 | 1.1 | Byte Data Engineering (`dataloader.py`) | structural gate **GREEN** (CPU); latency gate **BLOCKED on GPU backend** |
 | 1.2 | 1D CNN encoder + transition waveform (`encoder.py`) | shape-integrity gate **GREEN** (CPU) |
 | 1.3 | Low-pass filter + typo stress test (`lowpass.py`) | typo cosine ≥ 0.85 gate **GREEN** (CPU) |
+| 2.1 | Dynamic Entropy Patching slicing engine (`patcher.py`) | pack-vs-reference gate **GREEN** (GPU) |
+| 2.2 | Context-capped causal Concept Decoder (`transformer.py`) | shape + causal/pad-mask gate **GREEN** (GPU) |
 
-Phase-1 mathematical verification is complete on CPU (14/14 tests). The GPU
-latency (1.1) and VRAM (Phase 4) gates are deferred pending a ROCm backend.
+Phase-1 mathematical verification is complete (14/14). Phase-2 structural
+integration is verified on the native-Windows ROCm GPU (24/24 tests total).
+The Phase-4 VRAM gate is deferred to its sprint.
 
 ## Setup
 
