@@ -1,0 +1,31 @@
+[project]
+name = "thcm"
+version = "0.0.1"
+description = "Tokenless T-HCM (Transformer-Holographic Concept-Manifold) engine"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+]
+
+# NOTE: torch is intentionally NOT pinned here. The correct wheel depends on the
+# backend you resolve for AMD RX 9060 XT (RDNA4):
+#   - Linux + ROCm:    pip install torch --index-url https://download.pytorch.org/whl/rocm6.x
+#   - Windows DirectML: pip install torch-directml
+#   - WSL2 + ROCm:     same as Linux
+# See src/thcm/utils/device.py preflight and the README setup notes.
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
