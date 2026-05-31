@@ -29,10 +29,14 @@ See `docs/` (added per phase) for the full blueprint.
 | 1.3 | Low-pass filter + typo stress test (`lowpass.py`) | typo cosine ≥ 0.85 gate **GREEN** (CPU) |
 | 2.1 | Dynamic Entropy Patching slicing engine (`patcher.py`) | pack-vs-reference gate **GREEN** (GPU) |
 | 2.2 | Context-capped causal Concept Decoder (`transformer.py`) | shape + causal/pad-mask gate **GREEN** (GPU) |
+| 2.3 | Holographic Accumulator — HRR/FFT (`holographic.py`) | O(1) memory gate **GREEN** (GPU) |
 
-Phase-1 mathematical verification is complete (14/14). Phase-2 structural
-integration is verified on the native-Windows ROCm GPU (24/24 tests total).
-The Phase-4 VRAM gate is deferred to its sprint.
+Phase-1 mathematical verification is complete (14/14). **Phase 2 is done**: the
+full inference path (bytes → encoder → DEP → decoder → holographic memory) is
+wired and verified on the native-Windows ROCm GPU (29/29 tests total). The
+accumulator folds 25.6M concept vectors into a constant 16 KB state — resident
+memory is flat across stream length (`bench/memory_2_3.py`). The Phase-4 VRAM
+gate is deferred to its sprint.
 
 ## Setup
 
