@@ -12,6 +12,13 @@ from dataclasses import dataclass
 # --- Fixed architecture constants -------------------------------------------
 VOCAB_SIZE: int = 256  # V — raw byte vocabulary. IMMUTABLE. Never == "D by luck".
 
+# Hard context window for the local Transformer (Sprint 2.2). Concept Vectors
+# beyond this cap are NOT processed by attention — they overflow into the
+# Holographic Accumulator (Phase 3). The cap is a structural invariant: the
+# positional-encoding table has exactly this many slots, so exceeding it is a
+# loud contract violation, never a silent truncation.
+CONTEXT_CAP: int = 2048  # P_max the Transformer will attend over.
+
 
 @dataclass(frozen=True)
 class LoaderConfig:
