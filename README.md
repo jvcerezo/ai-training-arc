@@ -31,12 +31,16 @@ See `docs/` (added per phase) for the full blueprint.
 | 2.2 | Context-capped causal Concept Decoder (`transformer.py`) | shape + causal/pad-mask gate **GREEN** (GPU) |
 | 2.3 | Holographic Accumulator — HRR/FFT (`holographic.py`) | O(1) memory gate **GREEN** (GPU) |
 | 3.1 | Contrastive + next-concept loss (`training/losses.py`) | reward + optimizability gate **GREEN** (GPU) |
+| 3.2 | Training loop + ROCm mixed precision (`training/trainer.py`) | param-update + loss-decrease gate **GREEN** (GPU) |
 
 Phase-1 mathematical verification is complete (14/14). **Phase 2 is done**: the
 full inference path (bytes → encoder → DEP → decoder → holographic memory) is
-wired and verified on the native-Windows ROCm GPU (34/34 tests total). The
+wired and verified on the native-Windows ROCm GPU (39/39 tests total). The
 training objective (Phase 3.1) is an InfoNCE pair — next-concept prediction +
-self-identification contrastive — verified minimizable end-to-end. The
+self-identification contrastive — verified minimizable end-to-end, and the
+training loop (3.2) optimizes the full pipeline under fp32/bf16/fp16 (fp16 uses a
+GradScaler; bf16 runs scaler-free, ~2.3× faster than fp32 — `bench/train_3_2.py`).
+The
 accumulator folds 25.6M concept vectors into a constant 16 KB state — resident
 memory is flat across stream length (`bench/memory_2_3.py`). The Phase-4 VRAM
 gate is deferred to its sprint.
