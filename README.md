@@ -25,6 +25,11 @@ See `docs/` (added per phase) for the full blueprint.
 | Phase / Sprint | Item | State |
 |---|---|---|
 | 1.1 | Byte Data Engineering (`dataloader.py`) | structural gate **GREEN** (CPU); latency gate **BLOCKED on GPU backend** |
+| 1.2 | 1D CNN encoder + transition waveform (`encoder.py`) | shape-integrity gate **GREEN** (CPU) |
+| 1.3 | Low-pass filter + typo stress test (`lowpass.py`) | typo cosine ≥ 0.85 gate **GREEN** (CPU) |
+
+Phase-1 mathematical verification is complete on CPU (14/14 tests). The GPU
+latency (1.1) and VRAM (Phase 4) gates are deferred pending a ROCm backend.
 
 ## Setup
 
