@@ -168,6 +168,8 @@ def autotrain(corpus: str, device: str, trainer: THCMTrainer, cfg: AutoConfig, *
         _set_lr(trainer, ck["lr"])
         log(f"resumed from {last_path}: step {step}, best_val {best_val:.4f}, lr {ck['lr']:g}")
 
+    metrics({"event": "start", "step": step, "max_steps": cfg.max_steps,
+             "lr": _get_lr(trainer)})
     history: list[tuple[int, float, float]] = []
     converged = False
     t_prev, step_prev, last_train = time.perf_counter(), step, float("nan")

@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from thcm.training.dashboard import read_metrics
+from thcm.training.dashboard import read_log, read_metrics
 
 
 def _write(path, records: list[dict]) -> None:
@@ -48,6 +48,30 @@ def test_read_metrics_parses_and_summarizes(tmp_path) -> None:
     assert snap["series"]["val_loss"] == [4.8, 4.0, 4.3]
     assert snap["checkpoints"]["best"]["exists"] is True
     assert snap["checkpoints"]["best"]["size"] == 16
+
+
+def test_read_metrics_exposes_progress_and_log(tmp_path) -> None:
+    _write(tmp_path / "metrics.jsonl", [
+        {"t": 100.0, "event": "start", "step": 0, "max_steps": 5000, "lr": 3e-4},
+        {"t": 110.0, "event": "improve", "step": 500, "train_loss": 4.0, "val_loss": 3.9,
+         "val_acc": 0.3, "lr": 3e-4, "best_val": 3.9, "steps_per_sec": 8.0},
+    ])
+    (tmp_path / "training.log").write_text("line one\nstep 500: val improved\n", encoding="utf-8")
+
+    snap = read_metrics(str(tmp_path))
+    assert snap["status"]["max_steps"] == 5000        # surfaced for the progress bar
+    assert snap["status"]["step"] == 500              # latest step across all records
+    assert snap["status"]["elapsed"] == 10.0          # last_t - first_t
+    assert snap["status"]["last_event"] == "improve"
+    assert "step 500: val improved" in snap["log"]    # log tail included in payload
+
+
+def test_read_log_tail_and_missing(tmp_path) -> None:
+    assert read_log(str(tmp_path)) == []              # no file -> empty
+    (tmp_path / "training.log").write_text("\n".join(f"line {i}" for i in range(50)),
+                                           encoding="utf-8")
+    tail = read_log(str(tmp_path), max_lines=10)
+    assert tail[-1] == "line 49" and len(tail) == 10
 
 
 def test_read_metrics_tolerates_partial_last_line(tmp_path) -> None:

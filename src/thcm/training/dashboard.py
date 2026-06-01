@@ -1,16 +1,16 @@
 """Live web dashboard for an autonomous training run.
 
-Reads the `metrics.jsonl` / `best.pt` / `last.pt` that ``thcm.training.auto``
-writes and serves a self-refreshing page of status cards + charts (val/train
-loss, next-concept accuracy, learning rate). Pure standard library — no torch,
-no web framework — so it runs in its own process and can never disturb training.
+Reads the `metrics.jsonl` / `training.log` / `best.pt` / `last.pt` that
+``thcm.training.auto`` writes and serves a self-refreshing page: a progress bar +
+ETA, status cards, charts (val/train loss, next-concept accuracy, learning rate),
+and a live tail of the training log. Pure standard library — no torch, no web
+framework — so it runs in its own process and can never disturb training.
 
     .\\.venv\\Scripts\\python.exe -m thcm.training.dashboard --ckpt-dir checkpoints
     # then open http://localhost:8000
 
-Point ``--ckpt-dir`` at the same directory the trainer is writing to; the page
-polls the server every few seconds, so it tracks a live run (or shows the final
-state of a finished one).
+Point ``--ckpt-dir`` at the directory the trainer writes to; the page polls every
+few seconds, tracking a live run (or showing the final state of a finished one).
 """
 
 from __future__ import annotations
@@ -24,8 +24,24 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 _CKPT_DIR = "checkpoints"
 
 
+def read_log(ckpt_dir: str, max_lines: int = 400, max_bytes: int = 96_000) -> list[str]:
+    """Tail of training.log (reads only the final chunk so it scales to long runs)."""
+    path = os.path.join(ckpt_dir, "training.log")
+    if not os.path.exists(path):
+        return []
+    with open(path, "rb") as fh:
+        fh.seek(0, os.SEEK_END)
+        size = fh.tell()
+        fh.seek(max(0, size - max_bytes))
+        data = fh.read().decode("utf-8", errors="replace")
+    lines = data.splitlines()
+    if size > max_bytes and lines:
+        lines = lines[1:]                       # drop the partial first line
+    return lines[-max_lines:]
+
+
 def read_metrics(ckpt_dir: str) -> dict:
-    """Parse metrics + checkpoint state into a JSON-serializable snapshot."""
+    """Parse metrics + log + checkpoint state into a JSON-serializable snapshot."""
     path = os.path.join(ckpt_dir, "metrics.jsonl")
     records: list[dict] = []
     if os.path.exists(path):
@@ -37,7 +53,7 @@ def read_metrics(ckpt_dir: str) -> dict:
                 try:
                     records.append(json.loads(line))
                 except json.JSONDecodeError:
-                    continue                      # tolerate a half-written last line
+                    continue                    # tolerate a half-written last line
 
     def finfo(name: str) -> dict:
         p = os.path.join(ckpt_dir, name)
@@ -46,20 +62,27 @@ def read_metrics(ckpt_dir: str) -> dict:
             return {"exists": True, "size": st.st_size, "mtime": st.st_mtime}
         return {"exists": False}
 
+    def last_with(key: str):
+        return next((r[key] for r in reversed(records) if r.get(key) is not None), None)
+
     evals = [r for r in records if r.get("val_loss") is not None]
     latest = evals[-1] if evals else {}
-    best_val = min((r["val_loss"] for r in evals), default=None)
+    first_t = records[0].get("t") if records else None
+    last_t = records[-1].get("t") if records else None
     status = {
-        "step": latest.get("step"),
+        "step": last_with("step"),
+        "max_steps": last_with("max_steps"),
         "val_loss": latest.get("val_loss"),
         "val_acc": latest.get("val_acc"),
-        "train_loss": latest.get("train_loss"),
-        "lr": latest.get("lr"),
-        "best_val": best_val,
-        "steps_per_sec": latest.get("steps_per_sec"),
+        "train_loss": last_with("train_loss"),
+        "lr": last_with("lr"),
+        "best_val": min((r["val_loss"] for r in evals), default=None),
+        "steps_per_sec": last_with("steps_per_sec"),
         "last_event": records[-1].get("event") if records else None,
         "n_evals": len(evals),
-        "updated": records[-1].get("t") if records else None,
+        "started": first_t,
+        "updated": last_t,
+        "elapsed": (last_t - first_t) if (first_t and last_t) else None,
         "now": time.time(),
     }
     series = {
@@ -69,66 +92,127 @@ def read_metrics(ckpt_dir: str) -> dict:
         "val_acc": [r.get("val_acc") for r in evals],
         "lr": [r.get("lr") for r in evals],
     }
-    return {"status": status, "series": series,
+    return {"status": status, "series": series, "log": read_log(ckpt_dir),
             "checkpoints": {"best": finfo("best.pt"), "last": finfo("last.pt")}}
 
 
-PAGE = """<!doctype html><html><head><meta charset="utf-8">
+PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>T-HCM training</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
- body{font-family:system-ui,Segoe UI,sans-serif;margin:0;background:#0d1117;color:#e6edf3}
- header{padding:16px 24px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:16px}
- h1{font-size:18px;margin:0;font-weight:600}
- #dot{width:10px;height:10px;border-radius:50%;background:#888}
- .cards{display:flex;flex-wrap:wrap;gap:12px;padding:20px 24px}
- .card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px 18px;min-width:120px}
- .card .label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#8b949e}
- .card .value{font-size:22px;font-weight:600;margin-top:4px}
- .charts{display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:0 24px 24px}
- .chart{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px}
- @media(max-width:900px){.charts{grid-template-columns:1fr}}
- .ev{padding:2px 8px;border-radius:6px;font-size:12px;background:#21262d}
+ :root{--bg:#0d1117;--panel:#161b22;--line:#30363d;--muted:#8b949e;--fg:#e6edf3;
+   --blue:#58a6ff;--green:#3fb950;--amber:#d29922;--red:#f85149;--pink:#f778ba}
+ *{box-sizing:border-box}
+ body{font-family:system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:var(--bg);color:var(--fg)}
+ header{position:sticky;top:0;z-index:5;background:rgba(13,17,23,.9);backdrop-filter:blur(6px);
+   border-bottom:1px solid var(--line);padding:14px 24px;display:flex;align-items:center;gap:14px}
+ h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.02em}
+ .badge{padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;text-transform:uppercase;
+   letter-spacing:.04em;background:#21262d;color:var(--muted)}
+ #dot{width:9px;height:9px;border-radius:50%;background:var(--muted);box-shadow:0 0 0 0 rgba(63,185,80,.5)}
+ #dot.live{background:var(--green);animation:pulse 2s infinite}
+ @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(63,185,80,.5)}70%{box-shadow:0 0 0 7px rgba(63,185,80,0)}}
+ #fresh{color:var(--muted);font-size:13px;margin-left:auto}
+ main{padding:20px 24px;max-width:1400px;margin:0 auto}
+ .prog{height:8px;border-radius:6px;background:#21262d;overflow:hidden;margin:4px 0 6px}
+ .prog>div{height:100%;width:0;background:linear-gradient(90deg,var(--blue),var(--green));transition:width .5s}
+ .progmeta{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin-bottom:18px}
+ .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
+ .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+ .card .label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+ .card .value{font-size:23px;font-weight:650;margin-top:5px;font-variant-numeric:tabular-nums}
+ .card .sub{font-size:12px;color:var(--muted);margin-top:2px}
+ .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+ .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+ .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px}
+ #logwrap{grid-column:1/-1}
+ #log{height:300px;overflow:auto;background:#0a0d12;border:1px solid var(--line);border-radius:8px;
+   padding:10px 12px;font-family:"Cascadia Code",Consolas,monospace;font-size:12.5px;line-height:1.5}
+ #log .l{white-space:pre-wrap;word-break:break-word}
+ .c-green{color:var(--green)}.c-blue{color:var(--blue)}.c-amber{color:var(--amber)}
+ .c-red{color:var(--red)}.c-muted{color:var(--muted)}
+ @media(max-width:880px){.grid{grid-template-columns:1fr}}
 </style></head><body>
-<header><div id="dot"></div><h1>Tokenless T-HCM &mdash; training monitor</h1>
- <span class="ev" id="state">&mdash;</span><span id="fresh" style="color:#8b949e;font-size:13px"></span></header>
-<div class="cards" id="cards"></div>
-<div class="charts">
- <div class="chart"><canvas id="loss"></canvas></div>
- <div class="chart"><canvas id="acc"></canvas></div>
- <div class="chart"><canvas id="lr"></canvas></div>
-</div>
+<header>
+ <div id="dot"></div><h1>Tokenless T-HCM</h1>
+ <span class="badge" id="state">&mdash;</span>
+ <span id="fresh">connecting&hellip;</span>
+</header>
+<main>
+ <div class="prog"><div id="bar"></div></div>
+ <div class="progmeta"><span id="progL">step &mdash;</span><span id="progR"></span></div>
+ <div class="cards" id="cards"></div>
+ <div class="grid">
+  <div class="panel"><h2>loss</h2><canvas id="loss" height="150"></canvas></div>
+  <div class="panel"><h2>next-concept accuracy</h2><canvas id="acc" height="150"></canvas></div>
+  <div class="panel"><h2>learning rate</h2><canvas id="lr" height="150"></canvas></div>
+  <div class="panel"><h2>checkpoints</h2><div id="ckpt" style="font-size:13px;line-height:1.9"></div></div>
+  <div class="panel" id="logwrap"><h2>training log</h2><div id="log"></div></div>
+ </div>
+</main>
 <script>
-const fmt=(v,d=3)=>v==null?'\\u2014':Number(v).toFixed(d);
-const mk=(id,label,color,opts={})=>new Chart(document.getElementById(id),{type:'line',
- data:{labels:[],datasets:[]},options:{responsive:true,animation:false,
- plugins:{title:{display:true,text:label,color:'#e6edf3'},legend:{labels:{color:'#8b949e'}}},
- scales:{x:{ticks:{color:'#8b949e'},grid:{color:'#21262d'}},
-         y:{ticks:{color:'#8b949e'},grid:{color:'#21262d'},...(opts.y||{})}}}});
-const lossC=mk('loss','loss'),accC=mk('acc','next-concept accuracy'),
-      lrC=mk('lr','learning rate',{},{y:{type:'logarithmic'}});
-function ds(label,data,color){return {label,data,borderColor:color,backgroundColor:color,
- pointRadius:0,borderWidth:2,tension:.2}}
+const $=id=>document.getElementById(id);
+const NA='—';
+const fmt=(v,d=3)=>v==null?NA:Number(v).toFixed(d);
+const sci=v=>v==null?NA:Number(v).toExponential(1);
+function dur(s){if(s==null)return NA;s=Math.round(s);const h=s/3600|0,m=(s%3600)/60|0,x=s%60;
+ return h?`${h}h ${m}m`:(m?`${m}m ${x}s`:`${x}s`);}
+const BADGE={improve:'var(--green)',start:'var(--blue)',stall:'var(--amber)',
+ plateau:'var(--amber)',diverge:'var(--red)',converged:'var(--blue)',finish:'var(--muted)'};
+const C='#8b949e', G='#21262d';
+const base=(title,log)=>({type:'line',data:{labels:[],datasets:[]},options:{responsive:true,
+ maintainAspectRatio:false,animation:false,interaction:{intersect:false,mode:'index'},
+ plugins:{legend:{labels:{color:C,boxWidth:12}}},
+ scales:{x:{ticks:{color:C,maxTicksLimit:8},grid:{color:G}},
+  y:{ticks:{color:C},grid:{color:G},...(log?{type:'logarithmic'}:{})}}}});
+const lossC=new Chart($('loss'),base('loss')),accC=new Chart($('acc'),base('acc')),
+      lrC=new Chart($('lr'),base('lr',true));
+const ds=(label,data,c)=>({label,data,borderColor:c,backgroundColor:c,pointRadius:0,borderWidth:2,tension:.25});
+function logClass(t){t=t.toLowerCase();
+ if(t.includes('improved')||t.includes('saving best'))return'c-green';
+ if(t.includes('converged'))return'c-blue';
+ if(t.includes('non-finite')||t.includes('warning')||t.includes('error'))return'c-red';
+ if(t.includes('plateau'))return'c-amber';
+ if(t.includes('no improvement'))return'c-muted';return'';}
 async function tick(){
- let d; try{d=await (await fetch('/api/status')).json()}catch(e){return}
- const s=d.status, x=d.series.step;
- const cards=[['state',s.last_event||'\\u2014'],['step',s.step??'\\u2014'],
-  ['best val',fmt(s.best_val)],['val loss',fmt(s.val_loss)],
-  ['val acc',fmt(s.val_acc)],['lr',s.lr==null?'\\u2014':s.lr.toExponential(1)],
-  ['steps/sec',fmt(s.steps_per_sec,2)],['evals',s.n_evals??0]];
- document.getElementById('cards').innerHTML=cards.map(c=>
-  `<div class="card"><div class="label">${c[0]}</div><div class="value">${c[1]}</div></div>`).join('');
- document.getElementById('state').textContent=s.last_event||'\\u2014';
+ let d; try{d=await(await fetch('/api/status')).json()}catch(e){$('fresh').textContent='server offline';return}
+ const s=d.status;
+ $('state').textContent=s.last_event||NA;
+ $('state').style.color=BADGE[s.last_event]||'var(--muted)';
  const age=s.updated?(s.now-s.updated):1e9, live=age<30;
- document.getElementById('dot').style.background=live?'#3fb950':'#8b949e';
- document.getElementById('fresh').textContent=s.updated?
-  (live?'live':`idle (${Math.round(age)}s)`):'waiting for metrics\\u2026';
- lossC.data.labels=x; lossC.data.datasets=[ds('val',d.series.val_loss,'#58a6ff'),
-   ds('train',d.series.train_loss,'#f778ba')]; lossC.update();
- accC.data.labels=x; accC.data.datasets=[ds('val acc',d.series.val_acc,'#3fb950')]; accC.update();
- lrC.data.labels=x; lrC.data.datasets=[ds('lr',d.series.lr,'#d29922')]; lrC.update();
+ $('dot').className=live?'live':'';
+ $('fresh').textContent=s.updated?(live?'live':`idle ${dur(age)}`):'waiting for metrics…';
+ // progress + ETA
+ const have=s.step!=null, max=s.max_steps;
+ const pct=(have&&max)?Math.min(100,100*s.step/max):0;
+ $('bar').style.width=pct+'%';
+ $('progL').textContent=have?`step ${s.step.toLocaleString()}${max?' / '+max.toLocaleString():''}`:'step '+NA;
+ let eta=NA; if(have&&max&&s.steps_per_sec)eta=dur((max-s.step)/s.steps_per_sec);
+ $('progR').textContent=(max?pct.toFixed(1)+'%  ·  ':'')+`elapsed ${dur(s.elapsed)}  ·  ETA ${eta}`;
+ // cards
+ const cards=[['best val',fmt(s.best_val),'lowest held-out loss'],
+  ['val loss',fmt(s.val_loss),'last eval'],['val acc',fmt(s.val_acc),'next-concept top-1'],
+  ['train loss',fmt(s.train_loss),'latest step'],['learning rate',sci(s.lr),''],
+  ['steps/sec',fmt(s.steps_per_sec,2),'throughput'],['evals',s.n_evals??0,''],
+  ['elapsed',dur(s.elapsed),'']];
+ $('cards').innerHTML=cards.map(c=>`<div class="card"><div class="label">${c[0]}</div>
+  <div class="value">${c[1]}</div><div class="sub">${c[2]||''}</div></div>`).join('');
+ // charts
+ const x=d.series.step;
+ lossC.data.labels=x;lossC.data.datasets=[ds('val',d.series.val_loss,'#58a6ff'),ds('train',d.series.train_loss,'#f778ba')];lossC.update();
+ accC.data.labels=x;accC.data.datasets=[ds('val acc',d.series.val_acc,'#3fb950')];accC.update();
+ lrC.data.labels=x;lrC.data.datasets=[ds('lr',d.series.lr,'#d29922')];lrC.update();
+ // checkpoints
+ const ck=d.checkpoints,mb=b=>b?(b/1e6).toFixed(1)+' MB':'';
+ $('ckpt').innerHTML=['best','last'].map(k=>{const c=ck[k];
+  return `<div><b>${k}.pt</b> &mdash; ${c.exists?`saved, ${mb(c.size)}`:'<span class="c-muted">not yet</span>'}</div>`;}).join('');
+ // log (auto-scroll when already near the bottom)
+ const box=$('log'),atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<40;
+ box.innerHTML=(d.log||[]).map(l=>`<div class="l ${logClass(l)}">${l.replace(/[<>&]/g,m=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[m]))}</div>`).join('');
+ if(atBottom)box.scrollTop=box.scrollHeight;
 }
-tick(); setInterval(tick,3000);
+tick();setInterval(tick,3000);
 </script></body></html>"""
 
 
