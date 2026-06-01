@@ -33,6 +33,7 @@ Progress is printed and appended to `<ckpt-dir>/training.log`.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import time
 from dataclasses import dataclass, field
@@ -146,8 +147,13 @@ def _load_checkpoint(trainer: THCMTrainer, ckpt: dict) -> None:
 
 
 def autotrain(corpus: str, device: str, trainer: THCMTrainer, cfg: AutoConfig, *,
-              batch_size: int, seq_len: int, resume: bool, log) -> TrainingSummary:
-    """Run the autonomous loop and return what it achieved."""
+              batch_size: int, seq_len: int, resume: bool, log,
+              metrics=lambda rec: None) -> TrainingSummary:
+    """Run the autonomous loop and return what it achieved.
+
+    `metrics` is called with a flat dict per eval (and at finish) for the live
+    dashboard; defaults to a no-op so the loop is usable without one.
+    """
     os.makedirs(cfg.ckpt_dir, exist_ok=True)
     best_path = os.path.join(cfg.ckpt_dir, "best.pt")
     last_path = os.path.join(cfg.ckpt_dir, "last.pt")
@@ -163,6 +169,7 @@ def autotrain(corpus: str, device: str, trainer: THCMTrainer, cfg: AutoConfig, *
 
     history: list[tuple[int, float, float]] = []
     converged = False
+    t_prev, step_prev, last_train = time.perf_counter(), step, float("nan")
     while step < cfg.max_steps and not converged:
         for batch in _prefetcher(train_ds, batch_size, device, cfg.workers):
             stats = trainer.step(batch)
@@ -175,7 +182,9 @@ def autotrain(corpus: str, device: str, trainer: THCMTrainer, cfg: AutoConfig, *
                     _load_checkpoint(trainer, torch.load(best_path, map_location=device))
                 _set_lr(trainer, lr)
                 log(f"step {step}: NON-FINITE loss -> restored best, lr -> {lr:g}")
+                metrics({"event": "diverge", "step": step, "lr": lr, "best_val": best_val})
                 continue
+            last_train = stats.total
 
             # --- periodic validation: the unsupervised improvement signal ---
             if step % cfg.eval_interval == 0:
@@ -183,7 +192,12 @@ def autotrain(corpus: str, device: str, trainer: THCMTrainer, cfg: AutoConfig, *
                                              cfg.workers, cfg.eval_batches)
                 history.append((step, val_loss, val_acc))
                 lr = _get_lr(trainer)
+                now = time.perf_counter()
+                sps = (step - step_prev) / max(1e-6, now - t_prev)
+                t_prev, step_prev = now, step
+                event = "stall"
                 if val_loss < best_val - cfg.min_delta:
+                    event = "improve"
                     log(f"step {step}: val {val_loss:.4f} (acc {val_acc:.3f}) "
                         f"improved from {best_val:.4f} -> saving best  [lr {lr:g}]")
                     best_val, patience_ctr = val_loss, 0
@@ -198,10 +212,16 @@ def autotrain(corpus: str, device: str, trainer: THCMTrainer, cfg: AutoConfig, *
                             log(f"step {step}: CONVERGED (lr {new_lr:g} < min {cfg.min_lr:g}) "
                                 f"— stopping. best_val {best_val:.4f}")
                             converged = True
-                            break
-                        _set_lr(trainer, new_lr)
-                        patience_ctr = 0
-                        log(f"step {step}: plateau -> lr {lr:g} -> {new_lr:g}")
+                        else:
+                            _set_lr(trainer, new_lr)
+                            patience_ctr = 0
+                            event = "plateau"
+                            log(f"step {step}: plateau -> lr {lr:g} -> {new_lr:g}")
+                metrics({"event": "converged" if converged else event, "step": step,
+                         "train_loss": last_train, "val_loss": val_loss, "val_acc": val_acc,
+                         "lr": _get_lr(trainer), "best_val": best_val, "steps_per_sec": sps})
+                if converged:
+                    break
 
             if step % cfg.ckpt_interval == 0:
                 torch.save(_checkpoint(trainer, step, best_val, patience_ctr,
@@ -212,6 +232,8 @@ def autotrain(corpus: str, device: str, trainer: THCMTrainer, cfg: AutoConfig, *
 
     torch.save(_checkpoint(trainer, step, best_val, patience_ctr, _get_lr(trainer)), last_path)
     log(f"finished: {step} steps, best_val {best_val:.4f}, converged={converged}")
+    metrics({"event": "finish", "step": step, "best_val": best_val,
+             "lr": _get_lr(trainer), "converged": converged})
     return TrainingSummary(steps=step, best_val=best_val, converged=converged,
                            val_history=history)
 
@@ -227,6 +249,19 @@ def _make_logger(ckpt_dir: str):
             fh.write(line + "\n")
 
     return log
+
+
+def _make_metrics(ckpt_dir: str):
+    """Append one JSON record per call to <ckpt-dir>/metrics.jsonl for the dashboard."""
+    os.makedirs(ckpt_dir, exist_ok=True)
+    path = os.path.join(ckpt_dir, "metrics.jsonl")
+
+    def emit(record: dict) -> None:
+        record = {"t": time.time(), **record}
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record) + "\n")
+
+    return emit
 
 
 def build_trainer(args: argparse.Namespace, device: str) -> THCMTrainer:
@@ -272,6 +307,7 @@ def main() -> None:
         patience=args.patience, workers=args.workers, ckpt_dir=args.ckpt_dir,
     )
     log = _make_logger(cfg.ckpt_dir)
+    metrics = _make_metrics(cfg.ckpt_dir)
     log(f"preflight: backend={report.backend} device={report.device_str} "
         f"accelerated={report.accelerated}")
     if not report.accelerated:
@@ -282,7 +318,8 @@ def main() -> None:
     log(f"params={n_params/1e6:.2f}M precision={args.precision} "
         f"batch={args.batch_size}x{args.seq_len} max_steps={args.max_steps}")
     autotrain(args.corpus, report.device_str, trainer, cfg,
-              batch_size=args.batch_size, seq_len=args.seq_len, resume=args.resume, log=log)
+              batch_size=args.batch_size, seq_len=args.seq_len, resume=args.resume,
+              log=log, metrics=metrics)
 
 
 if __name__ == "__main__":

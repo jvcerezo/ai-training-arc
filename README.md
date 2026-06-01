@@ -135,6 +135,21 @@ Defaults to bf16 (scaler-free, ~2.3× faster than fp32 on RDNA4). Key knobs:
 `--max-steps`, `--eval-interval`, `--patience`, `--batch-size`, `--seq-len`,
 `--embed-dim`, `--lr`, `--precision`. Checkpoints and corpora are git-ignored.
 
+### Live dashboard
+
+The autonomous trainer writes `<ckpt-dir>/metrics.jsonl`; a standalone, stdlib-only
+web UI renders it as live status cards + charts (val/train loss, next-concept
+accuracy, learning rate). It runs in its own process — no torch, can't disturb
+training:
+
+```powershell
+.\.venv\Scripts\python.exe -m thcm.training.dashboard --ckpt-dir checkpoints
+# open http://localhost:8000
+```
+
+The page polls every few seconds, so it tracks a live run and shows the final
+state of a finished one (green dot = fresh metrics, grey = idle/converged).
+
 ## Branching
 
 `main` (protected, per-Phase merges) <- `dev` (integration, all tests pass) <-
