@@ -48,7 +48,7 @@ from thcm.models.encoder import ByteEncoder
 from thcm.models.patcher import DynamicEntropyPatcher
 from thcm.models.transformer import ConceptDecoder
 from thcm.training.losses import THCMLoss
-from thcm.training.trainer import THCMTrainer, TrainConfig
+from thcm.training.trainer import THCMTrainer, TrainConfig, enable_speed
 from thcm.utils.device import preflight
 
 
@@ -203,8 +203,10 @@ def autotrain(corpus: str, device: str, trainer: THCMTrainer, cfg: AutoConfig, *
 
             # --- periodic validation: the unsupervised improvement signal ---
             if step % cfg.eval_interval == 0:
+                # workers=0 for eval: only a handful of small batches, so spawning
+                # (and tearing down) worker processes every eval is pure overhead.
                 val_loss, val_acc = evaluate(trainer, val_ds, batch_size, device,
-                                             cfg.workers, cfg.eval_batches)
+                                             0, cfg.eval_batches)
                 history.append((step, val_loss, val_acc))
                 lr = _get_lr(trainer)
                 now = time.perf_counter()
@@ -282,7 +284,7 @@ def _make_metrics(ckpt_dir: str):
 def build_trainer(args: argparse.Namespace, device: str) -> THCMTrainer:
     d = args.embed_dim
     return THCMTrainer(
-        encoder=ByteEncoder(embed_dim=d, num_blocks=4, kernel_size=5),
+        encoder=ByteEncoder(embed_dim=d, num_blocks=args.num_blocks, kernel_size=5),
         patcher=DynamicEntropyPatcher(threshold_k=args.threshold_k),
         decoder=ConceptDecoder(embed_dim=d, num_heads=args.num_heads, num_layers=args.num_layers),
         loss_fn=THCMLoss(embed_dim=d),
@@ -305,6 +307,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--seq-len", type=int, default=2048)
     p.add_argument("--embed-dim", type=int, default=ModelDims().embed_dim)
+    p.add_argument("--num-blocks", type=int, default=4, help="encoder conv depth (lower = faster)")
     p.add_argument("--num-layers", type=int, default=4)
     p.add_argument("--num-heads", type=int, default=8)
     p.add_argument("--lr", type=float, default=3e-4)
@@ -316,6 +319,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    enable_speed()                                     # backend autotune (training path)
     report = preflight()
     cfg = AutoConfig(
         max_steps=args.max_steps, eval_interval=args.eval_interval,
