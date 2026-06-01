@@ -34,23 +34,28 @@ See `docs/` (added per phase) for the full blueprint.
 | 3.2 | Training loop + ROCm mixed precision (`training/trainer.py`) | param-update + loss-decrease gate **GREEN** (GPU) |
 | 3.3 | Memorization check (`training/losses.py::accuracy`) | overfit-to-zero gate **GREEN** (GPU) |
 | 4.1 | VRAM audit under extreme inputs (`eval/vram.py`) | flat steady-state VRAM gate **GREEN** (GPU) |
+| 4.2 | Robustness: semantic recovery (`eval/robustness.py`) | graceful-degradation gate **GREEN** (GPU) |
 
-Phase-1 mathematical verification is complete (14/14). **Phases 2, 3 and the
-4.1 VRAM audit are done**: the full inference path (bytes → encoder → DEP →
-decoder → holographic memory) is wired and verified on the native-Windows ROCm
-GPU (44/44 tests total); the stack memorizes a tiny batch — loss 4.3 → 0 and
-next-concept retrieval to 100% in ~25 steps (`bench/memorize_3_3.py`); and the
-streaming runner holds peak VRAM **flat at ~118 MB from 10 to 10 000 windows**
-(1000× more data) while a vanilla full-attention pass climbs 105 MB → ~3 GB over
-128 → 2048 patches (`bench/vram_4_1.py`). The
-training objective (Phase 3.1) is an InfoNCE pair — next-concept prediction +
-self-identification contrastive — verified minimizable end-to-end, and the
-training loop (3.2) optimizes the full pipeline under fp32/bf16/fp16 (fp16 uses a
-GradScaler; bf16 runs scaler-free, ~2.3× faster than fp32 — `bench/train_3_2.py`).
-The
+**All phases complete — 49/49 tests GREEN on the native-Windows ROCm GPU.** The
+full path (bytes → encoder → DEP → decoder → holographic memory) is wired,
+trainable, and profiled end-to-end:
+
+- **Memorization (3.3):** the stack overfits a tiny batch — loss 4.3 → 0 and
+  next-concept retrieval to 100% in ~25 steps (`bench/memorize_3_3.py`).
+- **O(1) memory (4.1):** the streaming runner holds peak VRAM **flat at ~118 MB
+  from 10 to 10 000 windows** (1000× more data) while a vanilla full-attention
+  pass climbs 105 MB → ~3 GB over 128 → 2048 patches (`bench/vram_4_1.py`).
+- **Robustness (4.2):** under heavy byte corruption the recovered patch structure
+  stays well above the surviving raw surface — at 60% corruption ~40% of bytes
+  survive but ~78% of DEP boundaries still agree (`bench/robustness_4_2.py`).
+- **Training (3.1/3.2):** the objective is an InfoNCE pair — next-concept
+  prediction + self-identification contrastive — minimizable end-to-end; the loop
+  runs fp32/bf16/fp16 (fp16 uses a GradScaler; bf16 is scaler-free, ~2.3× faster
+  than fp32 — `bench/train_3_2.py`).
+
+Phase-1 mathematical verification is complete (14/14). The holographic
 accumulator folds 25.6M concept vectors into a constant 16 KB state — resident
-memory is flat across stream length (`bench/memory_2_3.py`). The Phase-4 VRAM
-gate is deferred to its sprint.
+memory is flat across stream length (`bench/memory_2_3.py`).
 
 ## Setup
 
