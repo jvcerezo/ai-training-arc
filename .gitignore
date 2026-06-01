@@ -21,3 +21,8 @@ build/
 
 # Logs
 *.log
+
+# Training artifacts (checkpoints, corpora)
+*.pt
+*.bin
+checkpoints/
