@@ -107,13 +107,28 @@ PYTHONPATH=src python -m pytest -q
 
 ## Training
 
-The engine is tokenless, so any raw byte file is a valid corpus. The canonical
-choice for a byte-level model is **enwik8** (first 100 MB of Wikipedia):
+### Autonomous (one command)
 
 ```powershell
-Invoke-WebRequest https://mattmahoney.net/dc/enwik8.zip -OutFile enwik8.zip
-Expand-Archive enwik8.zip -DestinationPath .
+.\start.ps1
 ```
+
+That's the whole thing. `start.ps1` installs the package if needed, runs the GPU
+preflight, **auto-downloads enwik8** if it isn't present, launches training as a
+detached background process, and opens the live dashboard. Close the window —
+training keeps running. Stop it with `.\stop.ps1` (the best model stays in
+`checkpoints\best.pt`; re-running `start.ps1` resumes from where it left off).
+
+```powershell
+.\start.ps1 -Corpus mydata.txt -Port 9000 -MaxSteps 500000   # options
+```
+
+### Manual
+
+The engine is tokenless, so any raw byte file is a valid corpus; the trainer
+auto-downloads **enwik8** (first 100 MB of Wikipedia) when you pass
+`--corpus enwik8` and it's missing. (Requires `pip install -e .` once, or just
+use `start.ps1`.)
 
 **Single run** (logs loss / accuracy, checkpoints to `thcm_ckpt.pt`):
 

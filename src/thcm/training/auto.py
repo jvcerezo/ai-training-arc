@@ -43,6 +43,7 @@ from torch.utils.data import DataLoader, Subset
 
 from thcm.config import ModelDims
 from thcm.data.dataloader import ByteWindowDataset, CudaPrefetcher, collate_bytes
+from thcm.data.fetch import ensure_corpus
 from thcm.models.encoder import ByteEncoder
 from thcm.models.patcher import DynamicEntropyPatcher
 from thcm.models.transformer import ConceptDecoder
@@ -313,11 +314,12 @@ def main() -> None:
     if not report.accelerated:
         log("WARNING: no GPU backend resolved — training on CPU will be slow.")
 
+    corpus = ensure_corpus(args.corpus, log=log)       # auto-downloads enwik8 if missing
     trainer = build_trainer(args, report.device_str)
     n_params = sum(p.numel() for p in trainer.params)
     log(f"params={n_params/1e6:.2f}M precision={args.precision} "
         f"batch={args.batch_size}x{args.seq_len} max_steps={args.max_steps}")
-    autotrain(args.corpus, report.device_str, trainer, cfg,
+    autotrain(corpus, report.device_str, trainer, cfg,
               batch_size=args.batch_size, seq_len=args.seq_len, resume=args.resume,
               log=log, metrics=metrics)
 
