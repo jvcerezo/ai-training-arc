@@ -126,6 +126,7 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
  .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px}
+ .chartbox{position:relative;height:220px}
  #logwrap{grid-column:1/-1}
  #log{height:300px;overflow:auto;background:#0a0d12;border:1px solid var(--line);border-radius:8px;
    padding:10px 12px;font-family:"Cascadia Code",Consolas,monospace;font-size:12.5px;line-height:1.5}
@@ -144,9 +145,9 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
  <div class="progmeta"><span id="progL">step &mdash;</span><span id="progR"></span></div>
  <div class="cards" id="cards"></div>
  <div class="grid">
-  <div class="panel"><h2>loss</h2><canvas id="loss" height="150"></canvas></div>
-  <div class="panel"><h2>next-concept accuracy</h2><canvas id="acc" height="150"></canvas></div>
-  <div class="panel"><h2>learning rate</h2><canvas id="lr" height="150"></canvas></div>
+  <div class="panel"><h2>loss</h2><div class="chartbox"><canvas id="loss"></canvas></div></div>
+  <div class="panel"><h2>next-concept accuracy</h2><div class="chartbox"><canvas id="acc"></canvas></div></div>
+  <div class="panel"><h2>learning rate</h2><div class="chartbox"><canvas id="lr"></canvas></div></div>
   <div class="panel"><h2>checkpoints</h2><div id="ckpt" style="font-size:13px;line-height:1.9"></div></div>
   <div class="panel" id="logwrap"><h2>training log</h2><div id="log"></div></div>
  </div>
