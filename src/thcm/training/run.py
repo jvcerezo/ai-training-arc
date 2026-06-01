@@ -26,7 +26,7 @@ from thcm.models.encoder import ByteEncoder
 from thcm.models.patcher import DynamicEntropyPatcher
 from thcm.models.transformer import ConceptDecoder
 from thcm.training.losses import THCMLoss
-from thcm.training.trainer import THCMTrainer, TrainConfig
+from thcm.training.trainer import THCMTrainer, TrainConfig, enable_speed
 from thcm.utils.device import preflight
 
 
@@ -75,6 +75,7 @@ def save_checkpoint(trainer: THCMTrainer, step: int, path: str) -> None:
 
 def main() -> None:
     args = parse_args()
+    enable_speed()
     report = preflight()
     print(f"backend={report.backend} device={report.device_str} "
           f"accelerated={report.accelerated} — {report.detail}")

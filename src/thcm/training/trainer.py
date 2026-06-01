@@ -41,6 +41,19 @@ from thcm.training.losses import THCMLoss
 _AMP_DTYPE = {"fp16": torch.float16, "bf16": torch.bfloat16}
 
 
+def enable_speed() -> None:
+    """Turn on backend autotuning for the training path (call once at startup).
+
+    The encoder feeds the conv stack a fixed (B, L) input shape, so cuDNN/MIOpen
+    benchmark mode can pick the fastest algorithm once and reuse it; tf32 matmuls
+    speed up the Transformer. Kept out of THCMTrainer.__init__ so the test suite
+    (many small, shape-varying models) stays deterministic.
+    """
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+
+
 @dataclass(frozen=True)
 class TrainConfig:
     """Optimizer + mixed-precision hyperparameters."""
