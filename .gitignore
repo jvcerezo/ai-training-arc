@@ -4,6 +4,7 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+*.egg-info/
 
 # Environment
 .env
@@ -25,4 +26,6 @@ build/
 # Training artifacts (checkpoints, corpora)
 *.pt
 *.bin
+*.zip
+enwik8
 checkpoints/
