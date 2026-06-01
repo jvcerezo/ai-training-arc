@@ -35,8 +35,12 @@ See `docs/` (added per phase) for the full blueprint.
 | 3.3 | Memorization check (`training/losses.py::accuracy`) | overfit-to-zero gate **GREEN** (GPU) |
 | 4.1 | VRAM audit under extreme inputs (`eval/vram.py`) | flat steady-state VRAM gate **GREEN** (GPU) |
 | 4.2 | Robustness: semantic recovery (`eval/robustness.py`) | graceful-degradation gate **GREEN** (GPU) |
+| 5.1 | Generative byte head + bits-per-byte (`models/generator.py`) | causal + bpb-drops gate **GREEN** (GPU) |
 
-**All phases complete — 49/49 tests GREEN on the native-Windows ROCm GPU.** The
+**Phases 1–4 complete; Phase 5 (generative coding model) underway.** Phases 1–4
+proved the representation engine; Phase 5 adds the generative half needed for a
+coding tool — a strictly-causal byte LM head scored in bits-per-byte, optionally
+conditioned on the concept buffer as long-range memory. The
 full path (bytes → encoder → DEP → decoder → holographic memory) is wired,
 trainable, and profiled end-to-end:
 
