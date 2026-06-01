@@ -105,6 +105,36 @@ PYTHONPATH=src python src/thcm/utils/device.py
 PYTHONPATH=src python -m pytest -q
 ```
 
+## Training
+
+The engine is tokenless, so any raw byte file is a valid corpus. The canonical
+choice for a byte-level model is **enwik8** (first 100 MB of Wikipedia):
+
+```powershell
+Invoke-WebRequest https://mattmahoney.net/dc/enwik8.zip -OutFile enwik8.zip
+Expand-Archive enwik8.zip -DestinationPath .
+```
+
+**Single run** (logs loss / accuracy, checkpoints to `thcm_ckpt.pt`):
+
+```powershell
+.\.venv\Scripts\python.exe -m thcm.training.run --corpus enwik8
+```
+
+**Autonomous / unsupervised** — holds out a validation tail, saves the *best*
+checkpoint on every val improvement, decays the LR on plateaus (and stops once it
+converges), recovers from non-finite losses, and resumes from `last.pt` after a
+crash. Safe to leave running unattended; progress also appends to
+`<ckpt-dir>/training.log`:
+
+```powershell
+.\.venv\Scripts\python.exe -m thcm.training.auto --corpus enwik8 --resume
+```
+
+Defaults to bf16 (scaler-free, ~2.3× faster than fp32 on RDNA4). Key knobs:
+`--max-steps`, `--eval-interval`, `--patience`, `--batch-size`, `--seq-len`,
+`--embed-dim`, `--lr`, `--precision`. Checkpoints and corpora are git-ignored.
+
 ## Branching
 
 `main` (protected, per-Phase merges) <- `dev` (integration, all tests pass) <-
