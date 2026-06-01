@@ -82,6 +82,26 @@ def test_resume_continues_step_count(device: str, tmp_path) -> None:
     assert resumed.steps == 40                      # continued from 20, not restarted
 
 
+def test_heartbeat_emits_progress_between_evals(device: str, tmp_path) -> None:
+    """Frequent heartbeats keep step/throughput flowing without waiting for an
+    eval — what stops the dashboard from looking 'idle' mid-training."""
+    from thcm.training.auto import _make_metrics
+    from thcm.training.dashboard import read_metrics
+
+    torch.manual_seed(5)
+    corpus = _corpus(tmp_path / "c.bin", 120_000, structured=True)
+    cfg = AutoConfig(max_steps=20, eval_interval=1000, ckpt_interval=1000,
+                     heartbeat=5, patience=50, workers=0, ckpt_dir=str(tmp_path))
+    autotrain(corpus, device, _trainer(device), cfg, batch_size=4, seq_len=64,
+              resume=False, log=lambda m: None, metrics=_make_metrics(str(tmp_path)))
+
+    snap = read_metrics(str(tmp_path))
+    # No eval happened (interval 1000 > 20 steps), yet step advanced via heartbeats.
+    assert snap["status"]["n_evals"] == 0
+    assert snap["status"]["step"] == 20
+    assert snap["status"]["steps_per_sec"] is not None
+
+
 def test_plateau_drives_convergence_and_stops(device: str, tmp_path) -> None:
     """No real improvement + a high min_delta => LR decays past the floor and the
     run halts itself instead of training forever."""
