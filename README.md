@@ -33,12 +33,16 @@ See `docs/` (added per phase) for the full blueprint.
 | 3.1 | Contrastive + next-concept loss (`training/losses.py`) | reward + optimizability gate **GREEN** (GPU) |
 | 3.2 | Training loop + ROCm mixed precision (`training/trainer.py`) | param-update + loss-decrease gate **GREEN** (GPU) |
 | 3.3 | Memorization check (`training/losses.py::accuracy`) | overfit-to-zero gate **GREEN** (GPU) |
+| 4.1 | VRAM audit under extreme inputs (`eval/vram.py`) | flat steady-state VRAM gate **GREEN** (GPU) |
 
-Phase-1 mathematical verification is complete (14/14). **Phases 2 and 3 are
-done**: the full inference path (bytes → encoder → DEP → decoder → holographic
-memory) is wired and verified on the native-Windows ROCm GPU (41/41 tests
-total), and the stack memorizes a tiny batch — loss 4.3 → 0 and next-concept
-retrieval to 100% in ~25 steps (`bench/memorize_3_3.py`). The
+Phase-1 mathematical verification is complete (14/14). **Phases 2, 3 and the
+4.1 VRAM audit are done**: the full inference path (bytes → encoder → DEP →
+decoder → holographic memory) is wired and verified on the native-Windows ROCm
+GPU (44/44 tests total); the stack memorizes a tiny batch — loss 4.3 → 0 and
+next-concept retrieval to 100% in ~25 steps (`bench/memorize_3_3.py`); and the
+streaming runner holds peak VRAM **flat at ~118 MB from 10 to 10 000 windows**
+(1000× more data) while a vanilla full-attention pass climbs 105 MB → ~3 GB over
+128 → 2048 patches (`bench/vram_4_1.py`). The
 training objective (Phase 3.1) is an InfoNCE pair — next-concept prediction +
 self-identification contrastive — verified minimizable end-to-end, and the
 training loop (3.2) optimizes the full pipeline under fp32/bf16/fp16 (fp16 uses a
