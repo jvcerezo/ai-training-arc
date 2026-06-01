@@ -159,7 +159,7 @@ const fmt=(v,d=3)=>v==null?NA:Number(v).toFixed(d);
 const sci=v=>v==null?NA:Number(v).toExponential(1);
 function dur(s){if(s==null)return NA;s=Math.round(s);const h=s/3600|0,m=(s%3600)/60|0,x=s%60;
  return h?`${h}h ${m}m`:(m?`${m}m ${x}s`:`${x}s`);}
-const BADGE={improve:'var(--green)',start:'var(--blue)',stall:'var(--amber)',
+const BADGE={improve:'var(--green)',train:'var(--blue)',start:'var(--blue)',stall:'var(--amber)',
  plateau:'var(--amber)',diverge:'var(--red)',converged:'var(--blue)',finish:'var(--muted)'};
 const C='#8b949e', G='#21262d';
 const base=(title,log)=>({type:'line',data:{labels:[],datasets:[]},options:{responsive:true,
@@ -181,9 +181,9 @@ async function tick(){
  const s=d.status;
  $('state').textContent=s.last_event||NA;
  $('state').style.color=BADGE[s.last_event]||'var(--muted)';
- const age=s.updated?(s.now-s.updated):1e9, live=age<30;
+ const age=s.updated?(s.now-s.updated):1e9, live=age<60;
  $('dot').className=live?'live':'';
- $('fresh').textContent=s.updated?(live?'live':`idle ${dur(age)}`):'waiting for metrics…';
+ $('fresh').textContent=s.updated?(live?'training… live':`idle ${dur(age)}`):'waiting for metrics…';
  // progress + ETA
  const have=s.step!=null, max=s.max_steps;
  const pct=(have&&max)?Math.min(100,100*s.step/max):0;

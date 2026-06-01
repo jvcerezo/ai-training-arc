@@ -60,6 +60,7 @@ class AutoConfig:
     eval_interval: int = 500
     eval_batches: int = 20
     ckpt_interval: int = 1_000
+    heartbeat: int = 25          # emit a cheap progress metric every N steps
     val_fraction: float = 0.05
     patience: int = 5            # evals without improvement before an LR decay
     lr_decay: float = 0.5
@@ -173,6 +174,7 @@ def autotrain(corpus: str, device: str, trainer: THCMTrainer, cfg: AutoConfig, *
     history: list[tuple[int, float, float]] = []
     converged = False
     t_prev, step_prev, last_train = time.perf_counter(), step, float("nan")
+    hb_t, hb_step = time.perf_counter(), step
     while step < cfg.max_steps and not converged:
         for batch in _prefetcher(train_ds, batch_size, device, cfg.workers):
             stats = trainer.step(batch)
@@ -188,6 +190,16 @@ def autotrain(corpus: str, device: str, trainer: THCMTrainer, cfg: AutoConfig, *
                 metrics({"event": "diverge", "step": step, "lr": lr, "best_val": best_val})
                 continue
             last_train = stats.total
+
+            # --- heartbeat: cheap, frequent progress so the dashboard stays live
+            # between (expensive) evals. No forward pass — just the step's stats. ---
+            if step % cfg.heartbeat == 0:
+                now = time.perf_counter()
+                hb_sps = (step - hb_step) / max(1e-6, now - hb_t)
+                hb_t, hb_step = now, step
+                metrics({"event": "train", "step": step, "train_loss": last_train,
+                         "lr": _get_lr(trainer), "steps_per_sec": hb_sps,
+                         "best_val": best_val, "max_steps": cfg.max_steps})
 
             # --- periodic validation: the unsupervised improvement signal ---
             if step % cfg.eval_interval == 0:
@@ -287,6 +299,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--eval-interval", type=int, default=AutoConfig.eval_interval)
     p.add_argument("--eval-batches", type=int, default=AutoConfig.eval_batches)
     p.add_argument("--ckpt-interval", type=int, default=AutoConfig.ckpt_interval)
+    p.add_argument("--heartbeat", type=int, default=AutoConfig.heartbeat)
     p.add_argument("--patience", type=int, default=AutoConfig.patience)
     p.add_argument("--ckpt-dir", default=AutoConfig.ckpt_dir)
     p.add_argument("--batch-size", type=int, default=32)
@@ -307,7 +320,8 @@ def main() -> None:
     cfg = AutoConfig(
         max_steps=args.max_steps, eval_interval=args.eval_interval,
         eval_batches=args.eval_batches, ckpt_interval=args.ckpt_interval,
-        patience=args.patience, workers=args.workers, ckpt_dir=args.ckpt_dir,
+        heartbeat=args.heartbeat, patience=args.patience,
+        workers=args.workers, ckpt_dir=args.ckpt_dir,
     )
     log = _make_logger(cfg.ckpt_dir)
     metrics = _make_metrics(cfg.ckpt_dir)
