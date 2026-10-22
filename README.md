@@ -18,13 +18,14 @@ Raw bytes (0-255)
   -> Hopfield / LSH clean-up           noise mitigation on retrieval
 ```
 
-See `docs/` (added per phase) for the full blueprint.
+Each stage's design, invariants and shape contract live in its module docstring
+under `src/thcm/` (one module per sprint; see the status table below).
 
 ## Status
 
 | Phase / Sprint | Item | State |
 |---|---|---|
-| 1.1 | Byte Data Engineering (`dataloader.py`) | structural gate **GREEN** (CPU); latency gate **BLOCKED on GPU backend** |
+| 1.1 | Byte Data Engineering (`dataloader.py`) | structural gate **GREEN**; latency measured on GPU — uint8 transfer ~158× cheaper than float one-hot (`bench/latency_1_1.py`) |
 | 1.2 | 1D CNN encoder + transition waveform (`encoder.py`) | shape-integrity gate **GREEN** (CPU) |
 | 1.3 | Low-pass filter + typo stress test (`lowpass.py`) | typo cosine ≥ 0.85 gate **GREEN** (CPU) |
 | 2.1 | Dynamic Entropy Patching slicing engine (`patcher.py`) | pack-vs-reference gate **GREEN** (GPU) |
@@ -36,12 +37,25 @@ See `docs/` (added per phase) for the full blueprint.
 | 4.1 | VRAM audit under extreme inputs (`eval/vram.py`) | flat steady-state VRAM gate **GREEN** (GPU) |
 | 4.2 | Robustness: semantic recovery (`eval/robustness.py`) | graceful-degradation gate **GREEN** (GPU) |
 | 5.1 | Generative byte head + bits-per-byte (`models/generator.py`) | causal + bpb-drops gate **GREEN** (GPU) |
-| 5.2 | Concept-memory ablation (`models/code_model.py`) | concept memory beats byte-LM baseline (3.29 vs 3.63 bpb) **GREEN** (GPU) |
+| 5.2 | Concept-memory ablation (`models/code_model.py`) | ~~3.29 vs 3.63 bpb~~ **INVALID** — memory path leaked future bytes (see 5.3) |
+| 5.3 | Causal concept path + generative autotrainer (`training/gen_auto.py`) | memory-mode causality gate **GREEN**; fair re-run of 5.2: **3.633 vs 3.631 bpb — no gain** (1.58M vs 0.86M params) |
 
 **Phases 1–4 complete; Phase 5 (generative coding model) underway.** Phases 1–4
 proved the representation engine; Phase 5 adds the generative half needed for a
 coding tool — a strictly-causal byte LM head scored in bits-per-byte, optionally
-conditioned on the concept buffer as long-range memory. The
+conditioned on the concept buffer as long-range memory.
+
+> **5.2 correction.** The original ablation's win came from leakage, not memory:
+> the bidirectional encoder convs, `GroupNorm(1, D)` over the whole sequence, and
+> the whole-sequence DEP threshold let the "prior patch" concept see the bytes
+> being predicted (perturbing a future byte changed past logits in 50/50 trials).
+> Sprint 5.3 adds a `causal` mode to the encoder and patcher (left-padded convs,
+> per-position LayerNorm, running-prefix threshold), used by `GenerativeTHCM`, plus
+> a gate that pins it. Re-run fairly at the same 800-step budget, concept memory
+> ties the plain byte LM while costing ~1.8× the parameters. Whether it pays off
+> with longer training or longer context is the open question.
+
+The
 full path (bytes → encoder → DEP → decoder → holographic memory) is wired,
 trainable, and profiled end-to-end:
 
@@ -126,7 +140,14 @@ training keeps running. Stop it with `.\stop.ps1` (the best model stays in
 
 ```powershell
 .\start.ps1 -Corpus mydata.txt -Port 9000 -MaxSteps 500000   # options
+.\start.ps1 -Objective concept                               # Phase-3 InfoNCE run instead
 ```
+
+The default objective is **generative** (`thcm.training.gen_auto`): next-byte
+prediction scored in bits-per-byte, checkpoints in `checkpoints_gen\`. On the
+dashboard, loss = bpb and accuracy = next-byte top-1. `-Objective concept` runs the
+Phase-3 next-concept objective into `checkpoints\` (it never trains the model to
+emit bytes).
 
 ### Manual
 
