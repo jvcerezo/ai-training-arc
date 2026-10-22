@@ -150,11 +150,16 @@ def _load_checkpoint(trainer: THCMTrainer, ckpt: dict) -> None:
 
 def autotrain(corpus: str, device: str, trainer: THCMTrainer, cfg: AutoConfig, *,
               batch_size: int, seq_len: int, resume: bool, log,
-              metrics=lambda rec: None) -> TrainingSummary:
+              metrics=lambda rec: None, evaluate_fn=evaluate,
+              checkpoint_fn=_checkpoint, load_fn=_load_checkpoint) -> TrainingSummary:
     """Run the autonomous loop and return what it achieved.
 
     `metrics` is called with a flat dict per eval (and at finish) for the live
     dashboard; defaults to a no-op so the loop is usable without one.
+
+    The loop only needs `trainer.step(batch).total` and `trainer.opt`; the three
+    `*_fn` hooks let another objective (e.g. the generative byte LM,
+    `thcm.training.gen_auto`) reuse this control policy unchanged.
     """
     os.makedirs(cfg.ckpt_dir, exist_ok=True)
     best_path = os.path.join(cfg.ckpt_dir, "best.pt")
@@ -164,7 +169,7 @@ def autotrain(corpus: str, device: str, trainer: THCMTrainer, cfg: AutoConfig, *
     step, best_val, patience_ctr = 0, float("inf"), 0
     if resume and os.path.exists(last_path):
         ck = torch.load(last_path, map_location=device)
-        _load_checkpoint(trainer, ck)
+        load_fn(trainer, ck)
         step, best_val, patience_ctr = ck["step"], ck["best_val"], ck["patience_ctr"]
         _set_lr(trainer, ck["lr"])
         log(f"resumed from {last_path}: step {step}, best_val {best_val:.4f}, lr {ck['lr']:g}")
@@ -184,7 +189,7 @@ def autotrain(corpus: str, device: str, trainer: THCMTrainer, cfg: AutoConfig, *
             if not (stats.total == stats.total) or abs(stats.total) == float("inf"):
                 lr = max(cfg.min_lr, _get_lr(trainer) * cfg.lr_decay)
                 if os.path.exists(best_path):
-                    _load_checkpoint(trainer, torch.load(best_path, map_location=device))
+                    load_fn(trainer, torch.load(best_path, map_location=device))
                 _set_lr(trainer, lr)
                 log(f"step {step}: NON-FINITE loss -> restored best, lr -> {lr:g}")
                 metrics({"event": "diverge", "step": step, "lr": lr, "best_val": best_val})
@@ -205,7 +210,7 @@ def autotrain(corpus: str, device: str, trainer: THCMTrainer, cfg: AutoConfig, *
             if step % cfg.eval_interval == 0:
                 # workers=0 for eval: only a handful of small batches, so spawning
                 # (and tearing down) worker processes every eval is pure overhead.
-                val_loss, val_acc = evaluate(trainer, val_ds, batch_size, device,
+                val_loss, val_acc = evaluate_fn(trainer, val_ds, batch_size, device,
                                              0, cfg.eval_batches)
                 history.append((step, val_loss, val_acc))
                 lr = _get_lr(trainer)
@@ -218,7 +223,7 @@ def autotrain(corpus: str, device: str, trainer: THCMTrainer, cfg: AutoConfig, *
                     log(f"step {step}: val {val_loss:.4f} (acc {val_acc:.3f}) "
                         f"improved from {best_val:.4f} -> saving best  [lr {lr:g}]")
                     best_val, patience_ctr = val_loss, 0
-                    torch.save(_checkpoint(trainer, step, best_val, patience_ctr, lr), best_path)
+                    torch.save(checkpoint_fn(trainer, step, best_val, patience_ctr, lr), best_path)
                 else:
                     patience_ctr += 1
                     log(f"step {step}: val {val_loss:.4f} (acc {val_acc:.3f}) "
@@ -241,13 +246,13 @@ def autotrain(corpus: str, device: str, trainer: THCMTrainer, cfg: AutoConfig, *
                     break
 
             if step % cfg.ckpt_interval == 0:
-                torch.save(_checkpoint(trainer, step, best_val, patience_ctr,
+                torch.save(checkpoint_fn(trainer, step, best_val, patience_ctr,
                                        _get_lr(trainer)), last_path)
 
             if step >= cfg.max_steps:
                 break
 
-    torch.save(_checkpoint(trainer, step, best_val, patience_ctr, _get_lr(trainer)), last_path)
+    torch.save(checkpoint_fn(trainer, step, best_val, patience_ctr, _get_lr(trainer)), last_path)
     log(f"finished: {step} steps, best_val {best_val:.4f}, converged={converged}")
     metrics({"event": "finish", "step": step, "best_val": best_val,
              "lr": _get_lr(trainer), "converged": converged})

@@ -9,19 +9,28 @@
   a validation set, saves the best checkpoint, decays LR on plateaus, recovers
   from divergence, and resumes from its last checkpoint on restart.
 
+.PARAMETER Objective
+  gen (default): the generative byte LM, scored in bits-per-byte - the path to a
+  coding model. concept: the Phase-3 next-concept (InfoNCE) objective.
+
 .EXAMPLE
   .\start.ps1
   .\start.ps1 -Corpus mydata.txt -Port 9000 -MaxSteps 500000
+  .\start.ps1 -Objective concept
 #>
 param(
   [string]$Corpus  = "enwik8",
   [int]   $Port    = 8000,
-  [string]$CkptDir = "checkpoints",
+  [ValidateSet("gen","concept")]
+  [string]$Objective = "gen",
+  [string]$CkptDir = "",
   [int]   $MaxSteps = 200000,
   [switch]$NoBrowser
 )
 
 $ErrorActionPreference = "Stop"
+if (-not $CkptDir) { $CkptDir = if ($Objective -eq "gen") { "checkpoints_gen" } else { "checkpoints" } }
+$module = if ($Objective -eq "gen") { "thcm.training.gen_auto" } else { "thcm.training.auto" }
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 $py = Join-Path $root ".venv\Scripts\python.exe"
@@ -41,7 +50,7 @@ Write-Host "[preflight]"
 New-Item -ItemType Directory -Force $CkptDir | Out-Null
 
 # 3. Launch the trainer detached (it auto-downloads enwik8 if missing).
-$trainArgs = @('-m','thcm.training.auto','--corpus',$Corpus,'--resume',
+$trainArgs = @('-m',$module,'--corpus',$Corpus,'--resume',
                '--ckpt-dir',$CkptDir,'--max-steps',$MaxSteps)
 $train = Start-Process -PassThru -WindowStyle Hidden -FilePath $py -ArgumentList $trainArgs `
   -RedirectStandardOutput "$CkptDir\console.out.log" -RedirectStandardError "$CkptDir\console.err.log"

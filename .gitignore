@@ -28,4 +28,4 @@ build/
 *.bin
 *.zip
 enwik8
-checkpoints/
+checkpoints*/

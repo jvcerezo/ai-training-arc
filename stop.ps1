@@ -2,10 +2,16 @@
 .SYNOPSIS
   Stop the background training + dashboard started by start.ps1.
 #>
-param([string]$CkptDir = "checkpoints")
+param([string]$CkptDir = "")
 
 $ErrorActionPreference = "SilentlyContinue"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Default: whichever objective's run is live (generative first, then concept).
+if (-not $CkptDir) {
+  $CkptDir = @("checkpoints_gen", "checkpoints") |
+    Where-Object { Test-Path (Join-Path $root "$_\pids.txt") } | Select-Object -First 1
+  if (-not $CkptDir) { Write-Host "no pids.txt in checkpoints_gen or checkpoints - nothing to stop."; return }
+}
 $pidFile = Join-Path $root "$CkptDir\pids.txt"
 if (-not (Test-Path $pidFile)) { Write-Host "no pids.txt in $CkptDir - nothing to stop."; return }
 
