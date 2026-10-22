@@ -54,6 +54,22 @@ def test_no_memory_baseline_is_causal(device: str) -> None:
     assert torch.allclose(base[0, :k], out[0, :k], atol=1e-5)
 
 
+def test_memory_mode_is_causal(device: str) -> None:
+    """Gate 5.3: the concept memory must not leak future bytes. Pre-fix, the
+    bidirectional encoder, GroupNorm and whole-sequence DEP threshold let the
+    prior-patch memory see the bytes being predicted (inflating the 5.2 ablation)."""
+    torch.manual_seed(4)
+    m = _model(device, use_memory=True).eval()
+    for trial in range(10):
+        bytes_in = torch.randint(0, 256, (1, 128), dtype=torch.uint8, device=device)
+        k = 40 + 8 * trial
+        pert = bytes_in.clone()
+        pert[0, k] = (int(pert[0, k]) + 1 + trial) % 256
+        with torch.no_grad():
+            base, out = m(bytes_in), m(pert)
+        assert torch.allclose(base[0, :k], out[0, :k], atol=1e-5), f"leak at k={k}"
+
+
 def test_memory_mode_backward_reaches_encoder(device: str) -> None:
     """End-to-end differentiability: byte loss flows through DEP+decoder into the
     concept encoder, so the concept path is actually trained by the LM signal."""

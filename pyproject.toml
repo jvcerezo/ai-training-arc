@@ -8,12 +8,10 @@ dependencies = [
     "scipy>=1.11",
 ]
 
-# NOTE: torch is intentionally NOT pinned here. The correct wheel depends on the
-# backend you resolve for AMD RX 9060 XT (RDNA4):
-#   - Linux + ROCm:    pip install torch --index-url https://download.pytorch.org/whl/rocm6.x
-#   - Windows DirectML: pip install torch-directml
-#   - WSL2 + ROCm:     same as Linux
-# See src/thcm/utils/device.py preflight and the README setup notes.
+# NOTE: torch is intentionally NOT pinned here. The backend for the AMD RX 9060 XT
+# (RDNA4) is native Windows ROCm 7.2.1: AMD's cp312 torch wheels from
+# repo.radeon.com, installed into a Python 3.12 venv. See the README "GPU backend"
+# section for the exact install, and src/thcm/utils/device.py for the preflight.
 
 [project.optional-dependencies]
 dev = [

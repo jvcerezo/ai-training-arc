@@ -48,9 +48,23 @@ def adaptive_threshold(waveform: torch.Tensor, k: float) -> torch.Tensor:
     return mean + k * std
 
 
-def detect_boundaries(waveform: torch.Tensor, k: float) -> torch.Tensor:
+def causal_threshold(waveform: torch.Tensor, k: float) -> torch.Tensor:
+    """Running mean + k * std over waveform[:, :t+1]. (B, L) -> (B, L).
+
+    The global threshold above reads the whole sequence, so whether a boundary
+    opens at t depends on bytes after t. Generative use needs prefix statistics.
+    """
+    assert waveform.dim() == 2, f"expected (B, L), got {tuple(waveform.shape)}"
+    w = waveform.float()
+    n = torch.arange(1, w.shape[1] + 1, device=w.device, dtype=w.dtype)
+    mean = torch.cumsum(w, dim=1) / n
+    var = (torch.cumsum(w * w, dim=1) / n - mean * mean).clamp(min=0.0)
+    return (mean + k * var.sqrt()).to(waveform.dtype)
+
+
+def detect_boundaries(waveform: torch.Tensor, k: float, causal: bool = False) -> torch.Tensor:
     """Boolean (B, L): True opens a new patch. Position 0 always opens one."""
-    thresh = adaptive_threshold(waveform, k)
+    thresh = causal_threshold(waveform, k) if causal else adaptive_threshold(waveform, k)
     boundaries = waveform > thresh                 # (B, L) bool
     boundaries[:, 0] = True                         # every sequence starts a patch
     return boundaries
@@ -88,14 +102,16 @@ class DynamicEntropyPatcher(nn.Module):
     """DEP: waveform -> adaptive boundaries -> packed variable-length patches.
 
     `k` sets sensitivity: higher k -> fewer boundaries -> longer patches.
+    `causal` uses a running (prefix) threshold so boundaries never depend on the future.
     """
 
-    def __init__(self, threshold_k: float = 1.0) -> None:
+    def __init__(self, threshold_k: float = 1.0, causal: bool = False) -> None:
         super().__init__()
         self.threshold_k = threshold_k
+        self.causal = causal
 
     def forward(self, trajectory: torch.Tensor, waveform: torch.Tensor) -> PatchedBatch:
-        boundaries = detect_boundaries(waveform, self.threshold_k)
+        boundaries = detect_boundaries(waveform, self.threshold_k, self.causal)
         packed = pack_patches(trajectory, boundaries)
         # Structural integrity assertions at the packing boundary.
         b, length, d = trajectory.shape

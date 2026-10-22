@@ -2,7 +2,7 @@
 
 Reads the `metrics.jsonl` / `training.log` / `best.pt` / `last.pt` that
 ``thcm.training.auto`` writes and serves a self-refreshing page: a progress bar +
-ETA, status cards, charts (val/train loss, next-concept accuracy, learning rate),
+ETA, status cards, charts (val/train loss or bpb, top-1 accuracy, learning rate),
 and a live tail of the training log. Pure standard library — no torch, no web
 framework — so it runs in its own process and can never disturb training.
 
@@ -146,7 +146,7 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
  <div class="cards" id="cards"></div>
  <div class="grid">
   <div class="panel"><h2>loss</h2><div class="chartbox"><canvas id="loss"></canvas></div></div>
-  <div class="panel"><h2>next-concept accuracy</h2><div class="chartbox"><canvas id="acc"></canvas></div></div>
+  <div class="panel"><h2>val top-1 accuracy</h2><div class="chartbox"><canvas id="acc"></canvas></div></div>
   <div class="panel"><h2>learning rate</h2><div class="chartbox"><canvas id="lr"></canvas></div></div>
   <div class="panel"><h2>checkpoints</h2><div id="ckpt" style="font-size:13px;line-height:1.9"></div></div>
   <div class="panel" id="logwrap"><h2>training log</h2><div id="log"></div></div>
@@ -193,7 +193,7 @@ async function tick(){
  $('progR').textContent=(max?pct.toFixed(1)+'%  ·  ':'')+`elapsed ${dur(s.elapsed)}  ·  ETA ${eta}`;
  // cards
  const cards=[['best val',fmt(s.best_val),'lowest held-out loss'],
-  ['val loss',fmt(s.val_loss),'last eval'],['val acc',fmt(s.val_acc),'next-concept top-1'],
+  ['val loss',fmt(s.val_loss),'last eval'],['val acc',fmt(s.val_acc),'top-1 (next concept or byte)'],
   ['train loss',fmt(s.train_loss),'latest step'],['learning rate',sci(s.lr),''],
   ['steps/sec',fmt(s.steps_per_sec,2),'throughput'],['evals',s.n_evals??0,''],
   ['elapsed',dur(s.elapsed),'']];
