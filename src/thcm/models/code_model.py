@@ -48,8 +48,11 @@ class GenerativeTHCM(nn.Module):
         self.byte_decoder = CausalByteDecoder(
             embed_dim=embed_dim, num_layers=byte_layers, num_heads=byte_heads, dropout=dropout)
         if use_memory:
-            self.encoder = ByteEncoder(embed_dim=embed_dim, num_blocks=encoder_blocks, kernel_size=5)
-            self.patcher = DynamicEntropyPatcher(threshold_k=threshold_k)
+            # Both causal: a bidirectional encoder or whole-sequence threshold lets
+            # the prior-patch memory see the bytes being predicted (Sprint 5.3 fix).
+            self.encoder = ByteEncoder(embed_dim=embed_dim, num_blocks=encoder_blocks,
+                                       kernel_size=5, causal=True)
+            self.patcher = DynamicEntropyPatcher(threshold_k=threshold_k, causal=True)
             self.concept_decoder = ConceptDecoder(
                 embed_dim=embed_dim, num_heads=concept_heads, num_layers=concept_layers, dropout=dropout)
 
